@@ -1,0 +1,112 @@
+import logging
+import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from downloader import download_video, download_audio, detect_music
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.environ.get("8724885641:AAHmJuxwmeNMovHZExdtxcVmGQbFWuUXImE", "8724885641:AAHmJuxwmeNMovHZExdtxcVmGQbFWuUXImE")
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Salom! Men video yuklovchi botman.\n\n"
+        "📥 Quyidagi platformalardan video yuklash mumkin:\n"
+        "• YouTube\n"
+        "• Instagram\n"
+        "• TikTok\n\n"
+        "🎵 Video yuborsangiz:\n"
+        "• Eng yuqori sifatda video\n"
+        "• MP3 audio\n"
+        "• Musiqa bo'lsa — original nomini topaman\n\n"
+        "Link yuboring! 👇"
+    )
+
+
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+
+    supported = any(domain in url for domain in [
+        "youtube.com", "youtu.be",
+        "instagram.com",
+        "tiktok.com", "vm.tiktok.com"
+    ])
+
+    if not supported:
+        await update.message.reply_text("❌ Faqat YouTube, Instagram va TikTok linklarini yuboling.")
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🎬 Video (yuqori sifat)", callback_data=f"video|{url}"),
+            InlineKeyboardButton("🎵 MP3 Audio", callback_data=f"audio|{url}"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Nima yuklamoqchisiz?", reply_markup=reply_markup)
+
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    action, url = data.split("|", 1)
+
+    await query.edit_message_text("⏳ Yuklanmoqda, iltimos kuting...")
+
+    try:
+        if action == "video":
+            file_path, title = download_video(url)
+            await query.message.reply_text(f"📹 Yuborilmoqda: *{title}*", parse_mode="Markdown")
+            with open(file_path, 'rb') as f:
+                await query.message.reply_video(
+                    video=f,
+                    caption=f"✅ {title}",
+                    supports_streaming=True
+                )
+            os.remove(file_path)
+
+        elif action == "audio":
+            file_path, title = download_audio(url)
+            music_info = await detect_music(file_path)
+
+            caption = f"🎵 {title}"
+            if music_info:
+                caption += f"\n\n🎼 Original musiqa: *{music_info['title']}*"
+                if music_info.get('artist'):
+                    caption += f"\n👤 Artist: *{music_info['artist']}*"
+                if music_info.get('link'):
+                    caption += f"\n🔗 [Tingla]({music_info['link']})"
+
+            with open(file_path, 'rb') as f:
+                await query.message.reply_audio(
+                    audio=f,
+                    caption=caption,
+                    parse_mode="Markdown"
+                )
+            os.remove(file_path)
+
+        await query.edit_message_text("✅ Yuklandi!")
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await query.edit_message_text(f"❌ Xatolik: {str(e)}")
+
+
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    logger.info("Bot ishga tushdi!")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
