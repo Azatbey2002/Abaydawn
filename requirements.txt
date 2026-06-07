@@ -1,4 +1,4 @@
 python-telegram-bot==20.7
 yt-dlp
-shazamio==0.4.0
+shazamio
 ffmpeg-python==0.2.0
